@@ -10,57 +10,113 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var drawnCard: TarotSession?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        VStack {
+            if let card = drawnCard {
+                VStack {
+                    Image(card.cardName)  // Remove TarotCard/ prefix since folder is not namespaced
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 200, height: 300)
+                        .onAppear {
+                            #if DEBUG
+                            print("Debug: Loading card image: \(card.cardName)")
+                            if let _ = UIImage(named: card.cardName) {
+                                errorMessage = nil
+                            } else {
+                                errorMessage = "Image not found: \(card.cardName)"
+                            }
+                            #endif
+                        }
+                    Text(card.cardName)
+                        .font(.title)
+                    Text(card.interpretation)
+                        .padding()
+                    Button(action: drawCard) {
+                        Text("Draw Another Card")
+                            .padding()
+                            .foregroundColor(.white)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isLoading)
                 }
-                .onDelete(perform: deleteItems)
-            }
-#if os(macOS)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-#endif
-            .toolbar {
-#if os(iOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-#endif
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+            } else {
+                VStack {
+                    Image("TarotDeck")  // Changed to use TarotDeck image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 200, height: 300)
+                        .onAppear {
+                            print("Debug: Loading default TarotDeck image")
+                        }
+                    Button(action: drawCard) {
+                        Text("Draw Card")
+                            .padding()
+                            .foregroundColor(.white)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isLoading)
                 }
             }
-        } detail: {
-            Text("Select an item")
+            if let errorMessage = errorMessage {
+                Text(errorMessage)
+                    .foregroundColor(.red)
+                    .padding()
+            }
+        }
+        .padding()
+    }
+
+    private func drawCard() {
+        isLoading = true
+        fetchTarotCard { cardName, interpretation in
+            let newCard = TarotSession(timestamp: Date(), cardName: cardName, cardImage: cardName, interpretation: interpretation)
+            // Remove TarotCard/ prefix since folder is not namespaced
+            modelContext.insert(newCard)
+            drawnCard = newCard
+            isLoading = false
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    private func fetchTarotCard(completion: @escaping (String, String) -> Void) {
+        guard let url: URL = URL(string: "https://dev.xiangci.net/api/tarot/one-card") else { 
+            errorMessage = "Invalid URL"
+            isLoading = false
+            return 
         }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+        
+        let task: URLSessionDataTask = URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data: Data = data, error == nil else { 
+                DispatchQueue.main.async {
+                    errorMessage = "Failed to fetch card"
+                    isLoading = false
+                }
+                return 
+            }
+            
+            if let json: [String : Any] = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+               let cardName: String = json["cardName"] as? String,
+               let interpretation: String = json["interpretation"] as? String {
+                DispatchQueue.main.async {
+                    completion(cardName, interpretation)
+                }
+            } else {
+                DispatchQueue.main.async {
+                    errorMessage = "Invalid response from server"
+                    isLoading = false
+                }
             }
         }
+        
+        task.resume()
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: TarotSession.self, inMemory: true)
 }
