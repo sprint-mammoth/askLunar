@@ -6,27 +6,16 @@
 //
 
 import SwiftUI
-import SwiftData
 
 @main
 struct askLunarApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            TarotSession.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
+    // This singleton manages the Core Data stack
+    let persistenceController = PersistenceController.shared
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(\.managedObjectContext, persistenceController.container.viewContext)
         }
-        .modelContainer(sharedModelContainer)
     }
 }

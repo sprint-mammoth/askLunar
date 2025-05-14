@@ -6,107 +6,194 @@
 //
 
 import SwiftUI
-import SwiftData
+import CoreData
+import AuthenticationServices
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
+    @Environment(\.managedObjectContext) private var viewContext
+    @StateObject private var authService = AuthenticationService()
     @State private var drawnCard: TarotSession?
     @State private var isLoading = false
-    @State private var errorMessage: String?
-
+    
     var body: some View {
-        VStack {
-            if let card = drawnCard {
-                VStack {
-                    Image(card.cardName)  // Remove TarotCard/ prefix since folder is not namespaced
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 200, height: 300)
-                        .onAppear {
-                            #if DEBUG
-                            print("Debug: Loading card image: \(card.cardName)")
-                            if let _ = UIImage(named: card.cardName) {
-                                errorMessage = nil
-                            } else {
-                                errorMessage = "Image not found: \(card.cardName)"
+        NavigationView {
+            VStack {
+                if authService.isAuthenticated {
+                    // User info section
+                    VStack {
+                        if let userInfo = authService.userInfo {
+                            Text("Welcome!")
+                                .font(.title)
+                            if let email = userInfo.email {
+                                Text("Email: \(email)")
                             }
-                            #endif
+                            if let fullName = userInfo.fullName {
+                                Text("Name: \(fullName)")
+                            }
+                            Text("User ID: \(userInfo.id)")
                         }
-                    Text(card.cardName)
-                        .font(.title)
-                    Text(card.interpretation)
+                        
+                        Button("Sign Out") {
+                            authService.signOut()
+                        }
                         .padding()
-                    Button(action: drawCard) {
-                        Text("Draw Another Card")
-                            .padding()
-                            .foregroundColor(.white)
+                        .foregroundColor(.white)
+                        .background(Color.red)
+                        .cornerRadius(8)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isLoading)
-                }
-            } else {
-                VStack {
-                    Image("TarotDeck")  // Changed to use TarotDeck image
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 200, height: 300)
-                        .onAppear {
-                            print("Debug: Loading default TarotDeck image")
+                    .padding()
+                    
+                    Divider()
+                    
+                    // Tarot card section
+                    if let card = drawnCard {
+                        VStack {
+                            Image(card.wrappedCardName)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 200, height: 300)
+                            Text(card.wrappedCardName)
+                                .font(.title)
+                            Text(card.wrappedInterpretation)
+                                .padding()
+                            Button(action: drawCard) {
+                                Text("Draw Another Card")
+                                    .padding()
+                                    .foregroundColor(.white)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isLoading)
                         }
-                    Button(action: drawCard) {
-                        Text("Draw Card")
-                            .padding()
-                            .foregroundColor(.white)
+                    } else {
+                        VStack {
+                            Image("TarotDeck")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 200, height: 300)
+                            Button(action: drawCard) {
+                                Text("Draw Card")
+                                    .padding()
+                                    .foregroundColor(.white)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isLoading)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isLoading)
+                } else {
+                    VStack {
+                        Text("Welcome to askLunar")
+                            .font(.title)
+                            .padding()
+                        
+                        SignInWithAppleButton(
+                            .signIn,
+                            onRequest: { request in
+                                request.requestedScopes = [.fullName, .email]
+                            },
+                            onCompletion: { _ in
+                                // We don't need to handle the result here as it's handled by the AuthenticationService delegate
+                                print("Debug: Apple Sign In button tapped")
+                            }
+                        )
+                        .frame(width: 280, height: 45)
+                        .padding()
+                        
+                        NavigationLink {
+                            TarotReadingViewControllerRepresentable()
+                                .ignoresSafeArea()
+                        } label: {
+                            Text("Try Tarot Stream Test")
+                                .padding()
+                                .foregroundColor(.white)
+                                .frame(width: 280)
+                                .background(Color.purple)
+                                .cornerRadius(8)
+                        }
+                        .padding(.top, 8)
+                        
+                        NavigationLink {
+                            StreamTextViewControllerRepresentable()
+                                .ignoresSafeArea()
+                        } label: {
+                            Text("Try Stream Text Demo")
+                                .padding()
+                                .foregroundColor(.white)
+                                .frame(width: 280)
+                                .background(Color.blue)
+                                .cornerRadius(8)
+                        }
+                        .padding(.top, 8)
+                        
+                        NavigationLink {
+                            SUStreamTextView()
+                        } label: {
+                            Text("Try SwiftUI Stream Text")
+                                .padding()
+                                .foregroundColor(.white)
+                                .frame(width: 280)
+                                .background(Color.green)
+                                .cornerRadius(8)
+                        }
+                        .padding(.top, 8)
+                        
+                        if let error = authService.errorMessage {
+                            Text(error)
+                                .foregroundColor(.red)
+                                .padding()
+                        }
+                    }
                 }
             }
-            if let errorMessage = errorMessage {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .padding()
+            .padding()
+            .navigationTitle("Ask Lunar")
+            .toolbar {
+                // Removing the toolbar item since we've moved it to the main view
             }
         }
-        .padding()
     }
-
+    
     private func drawCard() {
         isLoading = true
         fetchTarotCard { cardName, interpretation in
-            let newCard = TarotSession(timestamp: Date(), cardName: cardName, cardImage: cardName, interpretation: interpretation)
-            // Remove TarotCard/ prefix since folder is not namespaced
-            modelContext.insert(newCard)
+            let newCard = PersistenceController.shared.createTarotSession(
+                timestamp: Date(),
+                cardName: cardName,
+                cardImage: cardName,
+                interpretation: interpretation
+            )
             drawnCard = newCard
             isLoading = false
         }
     }
-
+    
     private func fetchTarotCard(completion: @escaping (String, String) -> Void) {
-        guard let url: URL = URL(string: "https://dev.xiangci.net/api/tarot/one-card") else { 
-            errorMessage = "Invalid URL"
+        guard let url = URL(string: "https://dev.xiangci.net/api/tarot/one-card") else { 
+            authService.errorMessage = "Invalid URL"
             isLoading = false
             return 
         }
         
-        let task: URLSessionDataTask = URLSession.shared.dataTask(with: url) { data, response, error in
-            guard let data: Data = data, error == nil else { 
+        var request = URLRequest(url: url)
+        authService.addAuthorizationHeader(to: &request)
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else { 
                 DispatchQueue.main.async {
-                    errorMessage = "Failed to fetch card"
+                    authService.errorMessage = "Failed to fetch card"
                     isLoading = false
                 }
                 return 
             }
             
-            if let json: [String : Any] = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-               let cardName: String = json["cardName"] as? String,
-               let interpretation: String = json["interpretation"] as? String {
+            if let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+               let cardName = json["cardName"] as? String,
+               let interpretation = json["interpretation"] as? String {
                 DispatchQueue.main.async {
                     completion(cardName, interpretation)
                 }
             } else {
                 DispatchQueue.main.async {
-                    errorMessage = "Invalid response from server"
+                    authService.errorMessage = "Invalid response from server"
                     isLoading = false
                 }
             }
@@ -116,7 +203,9 @@ struct ContentView: View {
     }
 }
 
-#Preview {
-    ContentView()
-        .modelContainer(for: TarotSession.self, inMemory: true)
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .environment(\.managedObjectContext, PersistenceController.shared.container.viewContext)
+    }
 }

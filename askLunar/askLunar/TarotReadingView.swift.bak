@@ -1,0 +1,354 @@
+import SwiftUI
+import Combine
+
+struct TarotReadingView: View {
+    @State private var opening: String = ""
+    @State private var interpretation: String = ""
+    @State private var oneLiner: String = ""
+    @State private var isLoading: Bool = false
+    @State private var hasError: Bool = false
+    @State private var errorMessage: String = ""
+    @State private var authToken: String = ""
+    @State private var isUsingAuth: Bool = false
+    @State private var retryCount: Int = 0
+    
+    // Additional state variables to force view updates
+    @State private var openingUpdateCounter: Int = 0
+    @State private var interpretationUpdateCounter: Int = 0
+    @State private var oneLinerUpdateCounter: Int = 0
+    
+    // Sample card data (replace with your actual card data)
+    private let cardName = "The Fool"
+    private let cardImageName = "0.THE FOOL"
+    
+    private let tarotService = TarotReadingService()
+    @State private var cancellables = Set<AnyCancellable>()
+    
+    // Access to Core Data
+    private let persistenceController = PersistenceController.shared
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Card image and name
+                VStack {
+                    Image(cardImageName)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 200)
+                        .cornerRadius(10)
+                        .onAppear {
+                            print("Attempting to load image: \(cardImageName)")
+                        }
+                    
+                    Text(cardName)
+                        .font(.title)
+                        .fontWeight(.bold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                
+                // Authentication toggle and token input
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Use Authentication", isOn: $isUsingAuth)
+                        .padding(.bottom, 5)
+                    
+                    if isUsingAuth {
+                        TextField("Enter JWT Token", text: $authToken)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                    }
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(10)
+                
+                // Loading indicator at the top of content
+                if isLoading {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
+                        Spacer()
+                    }
+                    .padding()
+                }
+                
+                // Reading sections - always show them even when empty
+                // Opening section
+                VStack(alignment: .leading, spacing: 10) {
+                    if !opening.isEmpty {
+                        Text("Opening")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        Text(opening)
+                            .font(.body)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .id("opening-\(openingUpdateCounter)") // Force refresh with counter
+                        
+                        // Debug counter (remove in production)
+                        Text("Updates: \(openingUpdateCounter)")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else if isLoading {
+                        Text("Opening")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            
+                        Text("Waiting for content...")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                            .italic()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(10)
+                .opacity(opening.isEmpty && !isLoading ? 0 : 1)
+                
+                // Interpretation section
+                VStack(alignment: .leading, spacing: 10) {
+                    if !interpretation.isEmpty {
+                        Text("Interpretation")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        Text(interpretation)
+                            .font(.body)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .id("interpretation-\(interpretationUpdateCounter)") // Force refresh with counter
+                        
+                        // Debug counter (remove in production)
+                        Text("Updates: \(interpretationUpdateCounter)")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else if isLoading {
+                        Text("Interpretation")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            
+                        Text("Waiting for content...")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                            .italic()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(10)
+                .opacity(interpretation.isEmpty && !isLoading ? 0 : 1)
+                
+                // One-liner section
+                VStack(alignment: .leading, spacing: 10) {
+                    if !oneLiner.isEmpty {
+                        Text("Summary")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        Text(oneLiner)
+                            .font(.body)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .id("oneliner-\(oneLinerUpdateCounter)") // Force refresh with counter
+                        
+                        // Debug counter (remove in production)
+                        Text("Updates: \(oneLinerUpdateCounter)")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else if isLoading {
+                        Text("Summary")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            
+                        Text("Waiting for content...")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                            .italic()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(10)
+                .opacity(oneLiner.isEmpty && !isLoading ? 0 : 1)
+                
+                // Error message with retry button
+                if hasError {
+                    VStack(spacing: 10) {
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .padding()
+                        
+                        Button("Retry") {
+                            retryReading()
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Color.blue)
+                        .cornerRadius(8)
+                    }
+                    .padding()
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(10)
+                }
+                
+                // Start reading button
+                Button(action: {
+                    startReading()
+                }) {
+                    Text("Get Tarot Reading")
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.purple)
+                        .cornerRadius(10)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .disabled(isLoading)
+            }
+            .padding()
+        }
+        .navigationTitle("Tarot Reading Stream Test")
+        .onAppear {
+            setupSubscriptions()
+        }
+        .onDisappear {
+            cancellables.forEach { $0.cancel() }
+            tarotService.cancelReading()
+        }
+    }
+    
+    private func setupSubscriptions() {
+        tarotService.openingPublisher
+            .sink { value in
+                let timestamp = Date()
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss.SSS"
+                let timeString = formatter.string(from: timestamp)
+                
+                print("🟢 [\(timeString)] UI received opening update: \(value.prefix(20))... (\(value.count) chars)")
+                opening = value
+                openingUpdateCounter += 1 // Force view update
+            }
+            .store(in: &cancellables)
+        
+        tarotService.interpretationPublisher
+            .sink { value in
+                let timestamp = Date()
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss.SSS"
+                let timeString = formatter.string(from: timestamp)
+                
+                print("🟢 [\(timeString)] UI received interpretation update: \(value.prefix(20))... (\(value.count) chars)")
+                interpretation = value
+                interpretationUpdateCounter += 1 // Force view update
+            }
+            .store(in: &cancellables)
+        
+        tarotService.oneLinerPublisher
+            .sink { value in
+                let timestamp = Date()
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss.SSS"
+                let timeString = formatter.string(from: timestamp)
+                
+                print("🟢 [\(timeString)] UI received one-liner update: \(value.prefix(20))... (\(value.count) chars)")
+                oneLiner = value
+                oneLinerUpdateCounter += 1 // Force view update
+            }
+            .store(in: &cancellables)
+        
+        tarotService.errorPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { error in
+                hasError = true
+                
+                // Improve error messages for specific cases
+                if error.localizedDescription.contains("EventSourceError error 0") {
+                    errorMessage = "Connection error: Unable to establish SSE connection. Please check your internet connection and try again."
+                } else {
+                    errorMessage = error.localizedDescription
+                }
+                
+                isLoading = false
+            }
+            .store(in: &cancellables)
+        
+        tarotService.completedPublisher
+            .receive(on: DispatchQueue.main)
+            .sink {
+                isLoading = false
+                
+                // Reset error state on successful completion
+                hasError = false
+                errorMessage = ""
+                
+                // Save the reading to CoreData if we have complete content
+                if !interpretation.isEmpty {
+                    saveReadingToCoreData()
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func startReading() {
+        // Reset UI state
+        opening = ""
+        interpretation = ""
+        oneLiner = ""
+        hasError = false
+        errorMessage = ""
+        isLoading = true
+        
+        // Authentication handling
+        if isUsingAuth {
+            if !authToken.isEmpty {
+                tarotService.setAuthToken(authToken)
+            } else {
+                // Since the API accepts any token, we'll use a fake one
+                tarotService.setAuthToken("fake-token")
+            }
+        } else {
+            // When not using authentication, use a default fake token anyway
+            // This helps prevent the EventSourceError on iOS 18
+            tarotService.setAuthToken("fake-token")
+        }
+        
+        // Start the tarot reading
+        tarotService.getReading(for: cardName)
+    }
+    
+    private func retryReading() {
+        retryCount += 1
+        print("Retrying reading (attempt \(retryCount))")
+        startReading()
+    }
+    
+    private func saveReadingToCoreData() {
+        // Create a new TarotSession and save it to Core Data
+        _ = persistenceController.createTarotSession(
+            timestamp: Date(),
+            cardName: cardName,
+            cardImage: cardImageName,
+            interpretation: interpretation
+        )
+        
+        print("Saved reading to Core Data")
+    }
+}
+
+#if DEBUG
+struct TarotReadingView_Previews: PreviewProvider {
+    static var previews: some View {
+        TarotReadingView()
+    }
+}
+#endif 
